@@ -1904,9 +1904,12 @@ def _mark_formatted(article: dict[str, Any]) -> dict[str, Any]:
 
 def _format_article_locally(article: dict[str, Any]) -> dict[str, Any]:
     formatted = dict(article)
-    formatted["content_markdown"] = _simple_paragraph_cleanup(
+    cleaned_content = _simple_paragraph_cleanup(
         str(article.get("content_markdown") or "")
     )
+    if str(article.get("local_recovery") or "").startswith("barrons_"):
+        cleaned_content = _strip_barrons_end_mark(cleaned_content)
+    formatted["content_markdown"] = cleaned_content
     formatted["formatted_markdown"] = True
     formatted["compiled_article"] = False
     formatted.setdefault("compile_status", "pending")
@@ -2183,6 +2186,10 @@ def _simple_paragraph_cleanup(content: str) -> str:
     if current:
         paragraphs.append(" ".join(current).strip())
     return "\n\n".join(paragraphs)
+
+
+def _strip_barrons_end_mark(content: str) -> str:
+    return re.sub(r"\s+B\s*$", "", content).rstrip()
 
 
 def _repair_line_break_hyphen(match: re.Match[str]) -> str:

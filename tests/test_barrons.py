@@ -27,6 +27,7 @@ from strategies.strategy_hybrid import (
     _build_local_layout_articles,
 )
 from strategies.strategy_scanned import (
+    _format_article_locally,
     _repair_short_articles,
     _simple_paragraph_cleanup,
 )
@@ -552,6 +553,33 @@ class BarronsLocalRecoveryTests(unittest.TestCase):
 
 
 class OriginalOnlyTests(unittest.TestCase):
+    def test_local_cleanup_removes_inline_barrons_end_mark(self) -> None:
+        article = _format_article_locally({
+            "content_markdown": "Investors may seek the relative safety of bonds. B",
+            "local_recovery": "barrons_native_layout_v1",
+        })
+        self.assertEqual(
+            article["content_markdown"],
+            "Investors may seek the relative safety of bonds.",
+        )
+
+    def test_local_cleanup_removes_paragraph_barrons_end_mark(self) -> None:
+        article = _format_article_locally({
+            "content_markdown": "The company may get DRAM back on track.\n\nB",
+            "local_recovery": "barrons_continuation_layout_v1",
+        })
+        self.assertEqual(
+            article["content_markdown"],
+            "The company may get DRAM back on track.",
+        )
+
+    def test_local_cleanup_preserves_end_mark_without_barrons_provenance(self) -> None:
+        article = _format_article_locally({
+            "content_markdown": "The security is rated B",
+            "local_recovery": "generic_native_layout_v1",
+        })
+        self.assertEqual(article["content_markdown"], "The security is rated B")
+
     def test_local_cleanup_preserves_compounds_and_repairs_split_words(self) -> None:
         cleaned = _simple_paragraph_cleanup(
             "The govern- ment reviewed trillion- dollar artificial- intelligence plans."
