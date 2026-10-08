@@ -1,0 +1,15 @@
+{
+  "_comment": "服务器示例。请按实际挂载点修改 input_dir、output_dir、state_db 和 dotenv_path。",
+  "publication_type": "BARRONS",
+  "input_dir": "/srv/papers/barrons/incoming",
+  "output_dir": "/srv/papers/barrons/output",
+  "state_db": "/srv/papers/barrons/state/processed_pdfs.sqlite3",
+  "dotenv_path": "/etc/barrons-pdf-cleaner.env",
+  "pattern": "*Barron*.pdf",
+  "recursive": false,
+  "selection_mode": "latest",
+  "content_mode": "original",
+  "poll_interval_seconds": 10800,
+  "stable_seconds": 20,
+  "min_pdf_bytes": 1024
+}

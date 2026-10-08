@@ -1,0 +1,13 @@
+{
+  "page_width": 634.0,
+  "page_height": 1219.0,
+  "blocks": [
+    {"id": "b010", "text": "What’s\nNews", "bbox": [31.18, 286.38, 97.48, 334.42]},
+    {"id": "b011", "text": "Business&Finance WSJ\nTHEWALLSTREETJOURNALWEEKEND", "bbox": [29.23, 65.33, 439.68, 389.3]},
+    {"id": "b013", "text": "Paramount won’t move forward with its merger with Warner Bros. Discovery until legal challenges are resolved. B1", "bbox": [20.12, 364.65, 108.21, 413.08]},
+    {"id": "b026", "text": "Worldwide", "bbox": [44.78, 692.79, 83.87, 704.51]},
+    {"id": "b030", "text": "Bahrain and Kuwait secretly sent jets to attack sites inside Iran, people familiar with the matter said. A8", "bbox": [20.12, 716.17, 108.33, 764.59]},
+    {"id": "right", "text": "Inside China’s All-Out Campaign To Catch Up With U.S AI Chips", "bbox": [120.46, 616.74, 501.0, 682.19]},
+    {"id": "contents", "text": "CONTENTS\nBooks C7-12", "bbox": [20.12, 1090.45, 61.91, 1133.67]}
+  ]
+}

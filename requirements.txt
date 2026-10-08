@@ -1,0 +1,25 @@
+# Numeric/image stack. Keep NumPy below 2 for the pinned OpenCV wheels.
+numpy>=1.24,<2
+opencv-python==4.6.0.66
+opencv-contrib-python==4.6.0.66
+# pdf2docx (via PaddleOCR/MinerU) requests the headless wheel without an
+# upper bound. Pin it too, otherwise current releases require NumPy 2.x.
+opencv-python-headless==4.6.0.66
+Pillow>=10,<12
+
+# PDF inspection, rendering, and OCR integration. Poppler and Tesseract are
+# system dependencies documented in README.md.
+PyMuPDF>=1.24,<2
+pypdf>=6,<7
+pdf2image>=1.17,<2
+pytesseract>=0.3.13,<0.4
+pdfminer.six==20251107
+
+# LLM-compatible API client and local environment loading.
+openai>=2,<3
+python-dotenv>=1,<2
+wordninja>=2,<3
+
+# MinerU fallback. Version 0.6.1 matches the UNIPipe compatibility layer used
+# by strategies/strategy_vector.py and wsj_vision_parser.py.
+magic-pdf[cpu]==0.6.1

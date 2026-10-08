@@ -1,0 +1,48 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+config.local.json
+config.json
+
+# Source PDFs are local inputs and may be very large
+input_pdfs/
+*.pdf
+
+# Generated publications: Markdown, images, page caches, and database indexes
+output_results/
+verification_output/
+
+# Local processing state and caches
+.state/
+.netlify/
+.netlify_publish
+.netlify_publish.next
+.netlify_releases/
+.static_sites/
+cache_json/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+database_index.js

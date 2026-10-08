@@ -1,0 +1,46 @@
+{
+  "page_width": 634.0,
+  "page_height": 1219.0,
+  "blocks": [
+    {
+      "bbox": [31.18, 130.52, 97.48, 178.55],
+      "text": "What’s\nNews\n"
+    },
+    {
+      "bbox": [29.23, 187.2, 99.43, 198.92],
+      "text": "Business&Finance\n"
+    },
+    {
+      "bbox": [20.12, 209.6, 108.22, 265.82],
+      "text": "\ue013Nvidia is in talks to pro-\nvide a roughly $250 billion\nbackstop for OpenAI as part\nof a massive data center\nproject, one of the most am-\nbitious financial transactions\nyet in America’s AI boom. A1\n"
+    },
+    {
+      "bbox": [20.13, 599.27, 108.59, 639.9],
+      "text": "\ue013More businesses are trans-\nferring claims to tariff refunds\nthey might be due as they\ngrow concerned that payouts\nmay not, in fact, appear. B3\n"
+    },
+    {
+      "bbox": [44.78, 645.22, 83.87, 656.94],
+      "text": "Worldwide\n"
+    },
+    {
+      "bbox": [20.12, 668.92, 108.73, 764.1],
+      "text": "\ue013Trump put off an escala-\ntion of his military campaign\nagainst Iran amid efforts to\nrevive diplomacy to open the\nStrait of Hormuz and a de-\nbate over the impact of de-\nclining munitions stocks. A1\n\ue013Attacks between Saudi\nArabia and Houthi rebels in Ye-\nmen are escalating, threaten-\ning to break a fragile truce\nthat has held for four years. A6\n"
+    },
+    {
+      "bbox": [20.13, 984.55, 107.87, 1040.77],
+      "text": "\ue013Brazil denied visas to two\nTrump administration offi-\ncials who planned to travel\nthere amid concerns they\nsought to undermine confi-\ndence in the country’s elec-\ntronic-voting system. A9\n"
+    },
+    {
+      "bbox": [20.13, 1043.0, 107.24, 1091.43],
+      "text": "\ue013North Korean leader Kim\nJong Un called for “radical”\nenhancements to the coun-\ntry’s military reconnaissance\nand intelligence capabilities,\nstate media reported. A8\n"
+    },
+    {
+      "bbox": [120.44, 120.64, 449.59, 143.29],
+      "text": "Tour de France Champion Makes History\n"
+    },
+    {
+      "bbox": [20.12, 1098.73, 108.53, 1141.95],
+      "text": "CONTENTS\nArts in Review..... A14\nBanking & Finance B10\nBusiness & Finance B2,3,6\n"
+    }
+  ]
+}
