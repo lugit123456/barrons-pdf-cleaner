@@ -35,13 +35,15 @@ cp .env.example .env
 - `pattern`：文件匹配规则。
 - `recursive`：是否递归扫描子目录。
 - `selection_mode`：`latest` 每轮只检查出版日期最新的一份；`all_unprocessed` 按新到旧检查所有文件，由状态库跳过已完成文件。
-- `content_mode`：`original` 只清洗英文原文且不调用 LLM 编译；`bilingual` 启用 `.env` 中的翻译、摘要、图片解读和 glossary 设置。
+- `content_mode`：`original` 只清洗英文原文且不调用 LLM 编译；`bilingual` 启用 `.env` 中的翻译、摘要和 glossary 设置。图片解读仍由 `LLM_ANALYZE_ARTICLE_IMAGES` 独立控制，默认关闭。
 - `poll_interval_seconds`：常驻模式的轮询间隔。
 - `stable_seconds`：文件最后修改后至少静置多久，避免读取尚未复制完成的 PDF。
 
 `content_mode=original` 会强制关闭文章翻译、图片解读和 glossary，并启用 Barron's 本地坐标清洗，不需要 API key。`bilingual` 模式需要在 `.env` 中配置可用的 LLM API。
 
 `bilingual` 模式采用两个独立请求：先按英文段落逐段翻译，并强制译文与原文一一对应；再单独生成中文标题和中文解读。英文正文始终由本地清洗结果提供，不接受模型改写。中文解读会根据英文篇幅动态控制在 420-1000 个汉字，并检查段落结构、列表式输出和过长句子。
+
+默认 `LLM_ANALYZE_ARTICLE_IMAGES=false`：程序仍会提取并保留 PDF 中的封面和文章图片，但不会把图片发送给视觉模型，也不会生成 `image_insights` 中文说明。
 
 ## 运行
 
