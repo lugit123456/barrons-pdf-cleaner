@@ -16,6 +16,10 @@ from strategies.strategy_scanned import (
     _compile_token_budget,
     _compile_article_with_llm,
     _pending_compile_pages,
+    _request_article_translation,
+    _summary_length_bounds,
+    _translation_prompt,
+    _validate_summary_style,
     retry_deferred_compiles,
 )
 
@@ -184,23 +188,96 @@ class DeferredCompileTests(unittest.TestCase):
             "glossary_entries": [{"id": "old"}],
             "term_annotations": [{"glossary_id": "old", "paragraph_index": 1}],
         }
-        response = {
-            "title_zh": "重新编译",
-            "summary_md": "### 一句话核心主旨\n测试",
-            "content_markdown": "New paragraph.",
-            "paragraphs": [
-                {"en_text": "New paragraph.", "zh_text": "新段落。", "role": "body"}
-            ],
-        }
         with patch(
-            "strategies.strategy_scanned._compile_article_data_with_retries",
-            return_value=response,
+            "strategies.strategy_scanned._request_article_translation",
+            return_value=[{
+                "en_text": "Old local paragraph.",
+                "zh_text": "旧的本地段落。",
+                "role": "body",
+            }],
+        ), patch(
+            "strategies.strategy_scanned._request_article_summary",
+            return_value=("重新编译", "第一段。\n\n第二段。\n\n第三段。"),
         ):
             compiled = _compile_article_with_llm(1, article)
         self.assertTrue(compiled["compiled_article"])
         self.assertTrue(compiled["glossary_invalidated"])
+        self.assertEqual(compiled["content_markdown"], "Old local paragraph.")
+        self.assertEqual(compiled["paragraphs"][0]["zh_text"], "旧的本地段落。")
         self.assertNotIn("term_annotations", compiled)
         self.assertNotIn("glossary_entries", compiled)
+
+    def test_translation_prompt_requires_natural_financial_chinese(self) -> None:
+        prompt = _translation_prompt(
+            "A Stock Has More Upside",
+            "MARKET VIEW",
+            [{"en_text": "Analysts raised guidance.", "role": "body"}],
+        )
+        self.assertIn("不逐词照搬英文语序", prompt)
+        self.assertIn("upside、downside、guidance", prompt)
+        self.assertIn("不把预测或分析师观点写成确定事实", prompt)
+        self.assertIn("段落顺序和数量完全一致", prompt)
+
+    def test_translation_keeps_source_english_and_requires_one_to_one_output(self) -> None:
+        source = [
+            {"en_text": "First exact paragraph.", "zh_text": "", "role": "body"},
+            {"en_text": "Second exact paragraph.", "zh_text": "", "role": "crosshead"},
+        ]
+        response = {
+            "paragraphs": [
+                {"zh_text": "第一段准确译文。"},
+                {"zh_text": "第二段准确译文。"},
+            ]
+        }
+        with patch(
+            "strategies.strategy_scanned._chat_completion_json",
+            return_value=response,
+        ):
+            translated = _request_article_translation(
+                title="Test",
+                category="MARKET VIEW",
+                source_paragraphs=source,
+                max_retries=1,
+            )
+        self.assertEqual(
+            [paragraph["en_text"] for paragraph in translated],
+            ["First exact paragraph.", "Second exact paragraph."],
+        )
+        self.assertEqual(translated[1]["role"], "crosshead")
+
+        with patch(
+            "strategies.strategy_scanned._chat_completion_json",
+            return_value={"paragraphs": [{"zh_text": "只有一段。"}]},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "数量不合格"):
+                _request_article_translation(
+                    title="Test",
+                    category="MARKET VIEW",
+                    source_paragraphs=source,
+                    max_retries=1,
+                )
+
+    def test_summary_length_scales_with_source_article(self) -> None:
+        self.assertEqual(
+            _summary_length_bounds([{"en_text": "word " * 500}]),
+            (420, 650),
+        )
+        self.assertEqual(
+            _summary_length_bounds([{"en_text": "word " * 1200}]),
+            (520, 800),
+        )
+        self.assertEqual(
+            _summary_length_bounds([{"en_text": "word " * 2000}]),
+            (620, 1000),
+        )
+
+    def test_summary_style_rejects_outlines_and_long_sentences(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不得使用标题"):
+            _validate_summary_style("# 第一段\n\n第二段。\n\n第三段。")
+        with self.assertRaisesRegex(ValueError, "过长句子"):
+            _validate_summary_style(
+                ("很" * 91) + "。\n\n第二段。\n\n第三段。"
+            )
 
 
 if __name__ == "__main__":

@@ -1922,83 +1922,40 @@ def _compile_article_with_llm(
     max_retries: int | None = None,
     deferred: bool = False,
 ) -> dict[str, Any]:
-    title = article.get("title") or "Untitled"
-    category = article.get("category") or "Unknown"
-    content = str(article.get("content_markdown") or "").strip()
-    prompt = f"""
-Compile the extracted OCR article into a structured newspaper article record.
-
-Rules:
-- Preserve the article's meaning and facts. Do not add new facts.
-- Do not summarize.
-- Repair OCR hyphenation caused by newspaper columns, e.g. "govern- ment" -> "government".
-- Repair extraction artifacts that insert spaces between letters inside one word, e.g. "c o m m i t t e d" -> "committed".
-- Merge visual line breaks that are only caused by narrow newspaper columns.
-- Insert paragraph breaks where the meaning changes.
-- Preserve bylines, subheadings, bullet-like lines, and italic page references when they are part of the article.
-- Remove page-navigation markers such as "Please turn to page A4" and "Continued from Page One" after article fragments have been merged.
-- Remove obvious newspaper boilerplate, copyright notices, subscription ads, printer information, and unrelated snippets if they slipped into the body.
-- Produce Chinese analysis based only on the article.
-- Translate each paragraph into fluent, natural Chinese that reads like it was originally written in Chinese
-- Focus on meaning and natural expression, not literal word-for-word translation
-- For proper nouns (people, organizations, companies, laws, policies, events, works, acronyms) that need context, provide both Chinese name and English original at first mention, e.g. 美国证券交易委员会（SEC）
-- For well-known Chinese translations (like 美联储 for Federal Reserve, 华尔街 for Wall Street), use the standard Chinese term
-- Preserve the original article's tone and style - if it's analytical, the Chinese should be analytical; if it's narrative, the Chinese should be narrative
-- Do NOT translate common English words into Chinese when they are part of a proper noun (e.g., keep "Apple Inc." as "苹果公司（Apple Inc.）", not "苹果公司（苹果公司）")
-- Return JSON only.
-- Do not output analysis, reasoning, notes, explanations, Markdown fences, or <think> tags outside the JSON.
-
-Chinese summary requirements:
-- Write a cohesive, flowing Chinese summary of 400-500 characters (not exceeding 600 characters)
-- Naturally integrate the core message, key arguments, supporting evidence, and potential implications
-- Use smooth, professional Chinese prose - do NOT use bullet points, numbered lists, or section headers
-- Write as if explaining the article to a knowledgeable Chinese reader
-- The summary should read like a well-written newspaper analysis piece, not a structured outline
-- Aim for depth and insight rather than brevity - provide substantive analysis
-
-Page: {page_idx}
-Title: {title}
-Category: {category}
-
---- RAW ARTICLE TEXT START ---
-{content}
---- RAW ARTICLE TEXT END ---
-
-Return JSON ONLY:
-{{
-  "title_zh": "中文标题",
-  "summary_md": "中文结构化摘要 Markdown",
-  "content_markdown": "formatted English Markdown with paragraphs separated by blank lines",
-  "paragraphs": [
-    {{
-      "en_text": "English paragraph text",
-      "zh_text": "中文翻译",
-      "role": "body"
-    }}
-  ]
-}}
-"""
+    title = str(article.get("title") or "Untitled")
+    category = str(article.get("category") or "Unknown")
+    formatted = _format_article_locally(article)
+    content = str(formatted.get("content_markdown") or "").strip()
+    source_paragraphs = _normalize_compiled_paragraphs(None, content)
+    request_attempts = max(
+        max_retries
+        or int(
+            os.getenv(
+                "LLM_COMPILE_INITIAL_RETRIES",
+                os.getenv("LLM_COMPILE_MAX_RETRIES", "1"),
+            )
+        ),
+        1,
+    )
     try:
-        print(f"  🧠 正在用 LLM 编译文章结构：{title}")
-        data = _compile_article_data_with_retries(
-            operation=f"文章结构编译：{title}",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=_compile_token_budget(content),
-            max_retries=max_retries or int(
-                os.getenv(
-                    "LLM_COMPILE_INITIAL_RETRIES",
-                    os.getenv("LLM_COMPILE_MAX_RETRIES", "1"),
-                )
-            ),
+        print(f"  🌐 正在逐段翻译文章：{title}")
+        paragraphs = _request_article_translation(
+            title=title,
+            category=category,
+            source_paragraphs=source_paragraphs,
+            max_retries=request_attempts,
         )
-        compiled = dict(article)
-        compiled["title_zh"] = str(data.get("title_zh") or "").strip()
-        compiled["summary_md"] = str(data.get("summary_md") or "").strip()
-        compiled["content_markdown"] = str(data.get("content_markdown") or "").strip() or _simple_paragraph_cleanup(content)
-        compiled["paragraphs"] = _normalize_compiled_paragraphs(
-            data.get("paragraphs"),
-            compiled["content_markdown"],
+        print(f"  🧠 正在生成中文解读：{title}")
+        title_zh, summary_md = _request_article_summary(
+            title=title,
+            category=category,
+            source_paragraphs=source_paragraphs,
+            max_retries=request_attempts,
         )
+        compiled = dict(formatted)
+        compiled["title_zh"] = title_zh
+        compiled["summary_md"] = summary_md
+        compiled["paragraphs"] = paragraphs
         for key in (
             "glossary_entries",
             "term_annotations",
@@ -2015,9 +1972,9 @@ Return JSON ONLY:
         compiled.pop("next_retry_at", None)
         return compiled
     except Exception as exc:
-        phase = "延迟编译仍失败" if deferred else "文章结构编译失败，已加入延迟重试队列"
+        phase = "延迟翻译仍失败" if deferred else "文章翻译失败，已加入延迟重试队列"
         print(f"  ⚠️ {phase}：{title}，错误：{_compact_error(exc)}")
-        failed = _format_article_locally(article)
+        failed = formatted
         failed["compile_status"] = "pending"
         failed["compile_attempts"] = int(article.get("compile_attempts") or 0) + 1
         failed["last_compile_error"] = _compact_error(exc, limit=500)
@@ -2038,99 +1995,273 @@ def _compile_token_budget(content: str) -> int:
     return min(configured_max, max(configured_min, estimated))
 
 
-def _compile_article_data_with_retries(
-    operation: str,
-    messages: list[dict[str, Any]],
-    max_tokens: int,
+def _render_article_prompt_paragraphs(
+    paragraphs: list[dict[str, str]],
+) -> str:
+    rendered = []
+    for index, paragraph in enumerate(paragraphs, start=1):
+        role = str(paragraph.get("role") or "body")
+        text = str(paragraph.get("en_text") or "").strip()
+        if text:
+            rendered.append(f"{index}. [{role}] {text}")
+    return "\n".join(rendered)
+
+
+def _translation_prompt(
+    title: str,
+    category: str,
+    paragraphs: list[dict[str, str]],
+) -> str:
+    return f"""你是一名资深英中财经新闻编辑。请逐段翻译下面的 Barron's 文章，只返回严格 JSON。
+
+翻译要求：
+1. 忠实保留原意、事实、数字、币种、立场和语气，不增添原文之外的信息，不把预测或分析师观点写成确定事实。
+2. 使用自然、清楚的现代中文，不逐词照搬英文语序。主动拆开过长的英文句子，补足中文所需的主语和逻辑连接，使每句话都能独立读懂。
+3. 根据上下文意译习语、隐喻和抽象表达。对 beat、miss、price in、upside、downside、guidance、spread、yield 等财经表达，写出中文读者能直接理解的具体含义，避免机械直译。
+4. 使用常见、准确的中文财经术语，清楚区分收入、利润、利润率、收益率、估值、目标价和回报率；不得把同一概念在上下文中随意换译。
+5. 保持段落顺序和数量完全一致。每个输入段落必须有且只有一个对应译文，不得合并、拆分或遗漏。
+6. crosshead 译成简短自然的中文小标题；body 译成正文。
+7. 人名，以及公司、品牌、平台、网站、app、产品、基金和指数的英文专名，始终保留原文英文拼写，不翻译、不音译，也不改用中文别名；不要写成“中文名（English）”。
+8. 对上述类别之外的具体组织、政策或法律、事件、地点、作品、出版物、项目及缩写，第一次出现时可在中文名称后用全角括号保留规范英文原文；后续不必重复。已有稳定中文译名的通用机构或市场概念可直接使用中文。
+9. Mr、Mrs、Ms、Dr 等英文称谓通常省略，只保留英文人名；只有称谓本身影响语义时才保留。
+10. 保持 Barron's 原文的分析性和审慎程度，不添加投资建议、风险提示套话、评论、摘要或说明。
+
+Title: {title}
+Category: {category}
+
+Source paragraphs:
+{_render_article_prompt_paragraphs(paragraphs)}
+
+Return JSON in this shape:
+{{
+  "paragraphs": [
+    {{
+      "zh_text": "自然、完整的中文译文"
+    }}
+  ]
+}}
+"""
+
+
+def _request_article_translation(
+    *,
+    title: str,
+    category: str,
+    source_paragraphs: list[dict[str, str]],
     max_retries: int,
-) -> dict[str, Any]:
+) -> list[dict[str, str]]:
+    if not source_paragraphs:
+        raise ValueError("逐段翻译缺少英文段落")
+    prompt = _translation_prompt(title, category, source_paragraphs)
     last_error: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
             data = _chat_completion_json(
-                operation=operation,
-                messages=messages,
-                max_tokens=max_tokens,
+                operation=f"逐段翻译：{title}",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "只返回 JSON。忠实翻译全文，但必须使用自然、清楚的现代中文，"
+                            "不得逐词照搬英文句法。"
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=_compile_token_budget(
+                    " ".join(
+                        str(paragraph.get("en_text") or "")
+                        for paragraph in source_paragraphs
+                    )
+                ),
+                temperature=0.1,
                 max_retries=1,
             )
-            data = _coerce_compiled_article_data(data)
-            if isinstance(data, dict):
-                quality_issue = _compiled_data_quality_issue(data)
-                if quality_issue:
-                    raise ValueError(quality_issue)
-                return data
-            raise ValueError(f"文章结构编译 JSON 不是 object（type={type(data).__name__}）")
+            raw_paragraphs = data.get("paragraphs") if isinstance(data, dict) else None
+            if not isinstance(raw_paragraphs, list):
+                raise ValueError("逐段翻译 JSON 缺少 paragraphs")
+            if len(raw_paragraphs) != len(source_paragraphs):
+                raise ValueError(
+                    f"逐段翻译数量不合格（{len(raw_paragraphs)}，"
+                    f"要求 {len(source_paragraphs)}）"
+                )
+            translated = []
+            for index, (source, raw) in enumerate(
+                zip(source_paragraphs, raw_paragraphs),
+                start=1,
+            ):
+                if not isinstance(raw, dict):
+                    raise ValueError(f"逐段翻译第 {index} 段不是 object")
+                zh_text = str(raw.get("zh_text") or raw.get("translation") or "").strip()
+                if not zh_text:
+                    raise ValueError(f"逐段翻译第 {index} 段译文为空")
+                translated.append(
+                    {
+                        "en_text": str(source.get("en_text") or "").strip(),
+                        "zh_text": zh_text,
+                        "role": str(source.get("role") or "body").strip() or "body",
+                    }
+                )
+            return translated
         except Exception as exc:
             last_error = exc
             if attempt < max_retries:
                 print(
-                    f"  🔁 {operation} 第 {attempt}/{max_retries} 次结构不合格，"
+                    f"  🔁 逐段翻译：{title} 第 {attempt}/{max_retries} 次结构不合格，"
                     f"准备重试：{_compact_error(exc)}"
                 )
                 time.sleep(min(2 * attempt, 8))
-    raise RuntimeError(str(last_error) if last_error else "文章结构编译 JSON 无效")
+    raise RuntimeError(str(last_error) if last_error else "逐段翻译 JSON 无效")
 
 
-def _compiled_data_quality_issue(data: dict[str, Any]) -> str | None:
-    if not _env_bool("STRICT_LLM_COMPILE", True):
-        return None
-
-    if not str(data.get("title_zh") or "").strip():
-        return "文章结构编译缺少 title_zh"
-    if not str(data.get("summary_md") or "").strip():
-        return "文章结构编译缺少 summary_md"
-
-    paragraphs = data.get("paragraphs")
-    if not isinstance(paragraphs, list) or not paragraphs:
-        return "文章结构编译缺少 paragraphs"
-
-    valid_paragraphs = [
-        paragraph for paragraph in paragraphs
-        if isinstance(paragraph, dict)
-        and (str(paragraph.get("en_text") or "").strip() or str(paragraph.get("zh_text") or "").strip())
-    ]
-    if not valid_paragraphs:
-        return "文章结构编译 paragraphs 为空"
-
-    zh_count = sum(
-        1 for paragraph in valid_paragraphs
-        if str(paragraph.get("zh_text") or "").strip()
-    )
-    min_ratio = float(os.getenv("STRICT_LLM_COMPILE_MIN_ZH_RATIO", "0.6"))
-    if zh_count / len(valid_paragraphs) < min_ratio:
-        return f"文章结构编译中文段落覆盖不足（{zh_count}/{len(valid_paragraphs)}）"
-    return None
-
-
-def _coerce_compiled_article_data(data: Any) -> Any:
-    if isinstance(data, dict):
-        for key in ("article", "data", "result", "record"):
-            nested = data.get(key)
-            if isinstance(nested, dict):
-                return nested
-        articles = data.get("articles")
-        if isinstance(articles, list) and articles and isinstance(articles[0], dict):
-            return articles[0]
-        return data
-
-    if isinstance(data, list):
-        dict_items = [item for item in data if isinstance(item, dict)]
-        if not dict_items:
-            return data
-        for item in dict_items:
-            if any(key in item for key in ("title_zh", "summary_md", "content_markdown")):
-                return item
-        if all("en_text" in item or "zh_text" in item for item in dict_items):
-            content_markdown = "\n\n".join(
-                str(item.get("en_text") or "").strip()
-                for item in dict_items
-                if str(item.get("en_text") or "").strip()
+def _summary_length_bounds(
+    source_paragraphs: list[dict[str, str]],
+) -> tuple[int, int]:
+    source_words = sum(
+        len(
+            re.findall(
+                r"\b[\w’'-]+\b",
+                str(paragraph.get("en_text") or ""),
             )
-            return {
-                "content_markdown": content_markdown,
-                "paragraphs": dict_items,
-            }
-    return data
+        )
+        for paragraph in source_paragraphs
+    )
+    if source_words <= 900:
+        return 420, 650
+    if source_words <= 1800:
+        return 520, 800
+    return 620, 1000
+
+
+def _summary_prompt(
+    title: str,
+    category: str,
+    paragraphs: list[dict[str, str]],
+    min_cn_chars: int,
+    max_cn_chars: int,
+) -> str:
+    return f"""你是一名面向中文投资者的资深财经编辑。请基于下面的 Barron's 英文原文，重新撰写中文标题和中文解读。只返回严格 JSON。
+
+这不是逐段翻译，也不是把原文每段压缩后依次拼接。你需要先理解文章真正讨论的投资问题，再按中文读者最容易理解的顺序重组材料。
+
+中文解读要求：
+1. 开头直接讲清文章的核心判断及现实背景；随后解释关键证据、估值依据或驱动因素；最后交代风险、反方观点和可能影响。主次分明，不追求覆盖所有细枝末节。
+2. 写成 3-5 个自然段，不使用小标题、项目符号或编号。每段只承担一个主要作用，段落之间要有自然的因果、转折或递进关系。
+3. 使用像中文原创财经稿一样顺畅、克制的表达。明确句子主语，优先使用短句和中等长度句；多数句子控制在 20-45 个汉字，超过 70 个汉字时应主动拆句。
+4. 避免欧化句式、连续堆叠分号、名词串联和生硬直译。根据语境解释 beat、miss、price in、upside、downside、guidance、spread、yield 等表达，不照搬英文词形。
+5. 关键数字和事实只选择真正支撑核心判断的内容。不得为了凑字数罗列信息、重复结论或加入原文没有的背景知识。
+6. 明确区分已发生的事实、公司指引、分析师预测和作者判断；不得把有条件的市场观点写成确定结论，也不得擅自添加投资建议。
+7. summary_md 使用 {min_cn_chars}-{max_cn_chars} 个汉字。文章较长时应利用额外篇幅讲清逻辑，而不是让句子变得更长。返回前自行检查，但不要输出字数。
+8. title_zh 应简洁、自然、准确，体现文章真正讨论的公司、资产或市场问题，避免逐词翻译和夸张的投资结论。
+9. title_zh 和 summary_md 中出现的人名，以及公司、品牌、平台、网站、app、产品、基金和指数的英文专名，始终保留原文英文拼写，不翻译、不音译，也不改用中文别名。
+
+Title: {title}
+Category: {category}
+
+Source paragraphs:
+{_render_article_prompt_paragraphs(paragraphs)}
+
+Return JSON in this shape:
+{{
+  "title_zh": "自然准确的中文标题",
+  "summary_md": "分成3-5个自然段的连贯中文解读"
+}}
+"""
+
+
+def _request_article_summary(
+    *,
+    title: str,
+    category: str,
+    source_paragraphs: list[dict[str, str]],
+    max_retries: int,
+) -> tuple[str, str]:
+    min_cn_chars, max_cn_chars = _summary_length_bounds(source_paragraphs)
+    prompt = _summary_prompt(
+        title,
+        category,
+        source_paragraphs,
+        min_cn_chars,
+        max_cn_chars,
+    )
+    last_error: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            data = _chat_completion_json(
+                operation=f"中文解读：{title}",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "只返回 JSON。你是在为中文投资者撰写原创财经编辑稿，"
+                            "不是逐段翻译或英文摘要的直译；表达必须自然、清楚、"
+                            "符合中文阅读习惯。"
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max(
+                    int(os.getenv("LLM_SUMMARY_MAX_TOKENS", "3000")),
+                    max_cn_chars * 3,
+                ),
+                temperature=0.4,
+                max_retries=1,
+            )
+            if not isinstance(data, dict):
+                raise ValueError("中文解读 JSON 不是 object")
+            title_zh = str(data.get("title_zh") or "").strip()
+            summary_md = str(data.get("summary_md") or "").strip()
+            if not title_zh or not summary_md:
+                raise ValueError("中文解读缺少 title_zh 或 summary_md")
+            if _env_bool("STRICT_LLM_COMPILE", True):
+                summary_cn_chars = _count_chinese_chars(summary_md)
+                if not min_cn_chars <= summary_cn_chars <= max_cn_chars:
+                    raise ValueError(
+                        f"中文解读字数不合格（{summary_cn_chars}，"
+                        f"要求 {min_cn_chars}-{max_cn_chars} 个汉字）"
+                    )
+                _validate_summary_style(summary_md)
+            return title_zh, summary_md
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries:
+                print(
+                    f"  🔁 中文解读：{title} 第 {attempt}/{max_retries} 次结构不合格，"
+                    f"准备重试：{_compact_error(exc)}"
+                )
+                time.sleep(min(2 * attempt, 8))
+    raise RuntimeError(str(last_error) if last_error else "中文解读 JSON 无效")
+
+
+def _count_chinese_chars(text: str) -> int:
+    return len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", text))
+
+
+def _validate_summary_style(summary: str) -> None:
+    paragraphs = [
+        part.strip()
+        for part in re.split(r"\n\s*\n", summary)
+        if part.strip()
+    ]
+    if not 3 <= len(paragraphs) <= 5:
+        raise ValueError(
+            f"中文解读段落不合格（{len(paragraphs)}，要求 3-5 个自然段）"
+        )
+    if any(
+        re.match(r"^(?:#{1,6}\s|[-*+]\s|\d+[.、)]\s*)", paragraph)
+        for paragraph in paragraphs
+    ):
+        raise ValueError("中文解读不得使用标题、项目符号或编号")
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"[。！？!?]+", summary)
+        if sentence.strip()
+    ]
+    longest = max((_count_chinese_chars(sentence) for sentence in sentences), default=0)
+    if longest > 90:
+        raise ValueError(
+            f"中文解读存在过长句子（{longest} 个汉字，单句不得超过 90 个汉字）"
+        )
 
 
 def _normalize_compiled_paragraphs(raw_paragraphs: Any, content_markdown: str) -> list[dict[str, str]]:
